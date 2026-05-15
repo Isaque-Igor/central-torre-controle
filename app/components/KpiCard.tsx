@@ -1,4 +1,4 @@
-//KpiCard.tsx
+// app/components/KpiCard.tsx
 "use client";
 
 interface KpiCardProps {
@@ -10,16 +10,20 @@ interface KpiCardProps {
     label: string;
     status: 'excelente' | 'atencao' | 'critico';
   };
+  loading?: boolean;
 }
 
-export default function KpiCard({ title, value, unit, type, efficiency }: KpiCardProps) {
+export default function KpiCard({ title, value, unit, type, efficiency, loading }: KpiCardProps) {
   return (
     <div className={`kpi-card k-${type}`}>
-      {/* O ícone agora é controlado puramente pelo CSS do seu globals.css */}
       <div className="kpi-label">{title}</div>
-      <div className="kpi-val">{value}</div>
+      {loading ? (
+        <div className="kpi-val" style={{ opacity: 0.3, fontSize: 20 }}>—</div>
+      ) : (
+        <div className="kpi-val">{value}</div>
+      )}
       <div className="kpi-unit">{unit}</div>
-      {efficiency && (
+      {efficiency && !loading && (
         <div className={`eff-badge ${efficiency.status}`}>
           {efficiency.label}
         </div>
