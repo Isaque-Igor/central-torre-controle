@@ -12,7 +12,7 @@ interface NavbarProps {
 
 const LINKS = [
   { label: "Expedição",     href: "/",           ativo: true  },
-  { label: "Intralogística", href: "/intralogistica", ativo: false },
+  { label: "Intralogística", href: "/intralogistica", ativo: true },
   { label: "Armazenagem",   href: "/armazenagem", ativo: false },
   { label: "Recebimento",   href: "/recebimento", ativo: false },
   { label: "Relatórios",    href: "/relatorios",  ativo: true  },

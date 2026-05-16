@@ -1,5 +1,6 @@
 //layout.tsx
 import { Barlow, Barlow_Condensed, JetBrains_Mono } from "next/font/google";
+import ChatWidget from "./components/ChatWidget";
 import "./globals.css";
 
 const sans = Barlow({ subsets: ["latin"], weight: ["400"], variable: "--font-sans" });
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="page-wrap relative z-10">
           {children}
         </div>
+        <ChatWidget />
       </body>
     </html>
   );
