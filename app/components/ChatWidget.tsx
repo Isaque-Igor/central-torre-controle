@@ -18,7 +18,7 @@ export default function ChatWidget() {
   useEffect(() => {
     let id = localStorage.getItem("chat-session-id");
     if (!id) {
-      id = `portal-${crypto.randomUUID()}`;
+      id = `portal-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
       localStorage.setItem("chat-session-id", id);
     }
     setSessionId(id);

@@ -178,7 +178,7 @@ export async function GET(req: NextRequest) {
             AND REGIAO = 'RORAIMA'
           THEN DOCUMENTO_VENDAS END) AS roraima_interior
 
-      FROM cd_bemol.torre_controle.tab_pedidos
+      FROM cd_bemol.torre_controle.ordens
       WHERE YEAR(DATA_ORD) IN (${anoSel}, ${anoAnt})
       GROUP BY YEAR(DATA_ORD), MONTH(DATA_ORD)
       ORDER BY ano, mes

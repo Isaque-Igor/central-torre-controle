@@ -5,6 +5,8 @@ const HOST         = process.env.DATABRICKS_HOST;
 const TOKEN        = process.env.DATABRICKS_TOKEN;
 const PATH         = process.env.DATABRICKS_SQL_HTTP_PATH;
 const WAREHOUSE_ID = PATH?.split("/").pop();
+const cache = new Map<string, { data: any; ts: number }>();
+const TTL = 60_000; // 1 minuto
 
 async function runQuery(statement: string) {
   const res = await fetch(`${HOST}/api/2.0/sql/statements`, {
@@ -141,106 +143,130 @@ function buildBase(inicio: string, fim: string, extraWhere = "") {
   `;
 }
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = req.nextUrl;
-  const dataInicio = searchParams.get("inicio");
-  const dataFim    = searchParams.get("fim");
-  const setor      = searchParams.get("setor");
-
-  const hoje  = new Date();
-  const ontem = new Date(hoje);
-  ontem.setDate(hoje.getDate() - 1);
-  const fmtISO = (d: Date) => d.toISOString().split("T")[0];
-
-  const inicio = dataInicio ?? fmtISO(ontem);
-  const fim    = dataFim    ?? fmtISO(ontem);
-
-  const setorFiltro        = setor ?? "Expedição Manaus";
-  const itinerariosDoSetor = SETOR_ITINERARIOS[setorFiltro];
-  const inClause           = itinerariosDoSetor
-    ? itinerariosDoSetor.map(i => `'${i}'`).join(",")
-    : "'NENHUM'";
-
-  try {
-    // Query 1 — KPIs por setor
-    const rowsSetor = await runQuery(`
-      ${buildBase(inicio, fim)},
-      com_setor AS (
-        SELECT *, ${buildCaseSetor()} AS SETOR FROM base
-      ),
-      planilhados AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor GROUP BY SETOR),
-      concluidos  AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor WHERE STATUS_DA_ENTREGA = 'CON' GROUP BY SETOR),
-      insucesso   AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor WHERE TIPO_HISTORICO = 'INS' GROUP BY SETOR),
-      finalizadas AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor WHERE STATUS_DA_ENTREGA IN ('CON','INS') GROUP BY SETOR),
-      transportes AS (SELECT SETOR, COUNT(DISTINCT NUMERO_DO_TRANSPORTE) AS qtd FROM com_setor GROUP BY SETOR)
-      SELECT
-        p.SETOR,
-        p.qtd                                                    AS planilhados,
-        COALESCE(c.qtd, 0)                                       AS concluidos,
-        COALESCE(i.qtd, 0)                                       AS insucesso,
-        GREATEST(p.qtd - COALESCE(f.qtd, 0), 0)                 AS pendentes,
-        t.qtd                                                    AS total_transportes,
-        ROUND(p.qtd * 1.0 / NULLIF(t.qtd, 0), 1)                AS media_nf_viagem,
-        ROUND(COALESCE(c.qtd, 0) * 100.0 / NULLIF(p.qtd, 0), 2) AS eficiencia_pct
-      FROM planilhados p
-      LEFT JOIN concluidos  c ON p.SETOR = c.SETOR
-      LEFT JOIN insucesso   i ON p.SETOR = i.SETOR
-      LEFT JOIN finalizadas f ON p.SETOR = f.SETOR
-      LEFT JOIN transportes t ON p.SETOR = t.SETOR
-      ORDER BY p.SETOR
-    `);
-
-    // Query 2 — por itinerário do setor selecionado
-    const rowsItn = await runQuery(`
-      ${buildBase(inicio, fim, `AND LPAD(CAST(f.ITINERARIO AS STRING), 6, '0') IN (${inClause})`)},
-      planilhados AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base GROUP BY ITINERARIO),
-      concluidos  AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA = 'CON' GROUP BY ITINERARIO),
-      insucesso   AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE TIPO_HISTORICO = 'INS' GROUP BY ITINERARIO),
-      finalizadas AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA IN ('CON','INS') GROUP BY ITINERARIO)
-      SELECT
-        p.ITINERARIO,
-        p.qtd                                                    AS planilhados,
-        COALESCE(c.qtd, 0)                                       AS concluidos,
-        COALESCE(i.qtd, 0)                                       AS insucesso,
-        GREATEST(p.qtd - COALESCE(f.qtd, 0), 0)                 AS pendentes,
-        ROUND(COALESCE(c.qtd, 0) * 100.0 / NULLIF(p.qtd, 0), 2) AS eficiencia_pct
-      FROM planilhados p
-      LEFT JOIN concluidos  c ON p.ITINERARIO = c.ITINERARIO
-      LEFT JOIN insucesso   i ON p.ITINERARIO = i.ITINERARIO
-      LEFT JOIN finalizadas f ON p.ITINERARIO = f.ITINERARIO
-      ORDER BY p.qtd DESC
-    `);
-
-    // Query 3 — por transporte do setor selecionado
-    const rowsTrp = await runQuery(`
-      ${buildBase(inicio, fim, `AND LPAD(CAST(f.ITINERARIO AS STRING), 6, '0') IN (${inClause})`)},
-      planilhados AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base GROUP BY NUMERO_DO_TRANSPORTE),
-      concluidos  AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA = 'CON' GROUP BY NUMERO_DO_TRANSPORTE),
-      insucesso   AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE TIPO_HISTORICO = 'INS' GROUP BY NUMERO_DO_TRANSPORTE),
-      finalizadas AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA IN ('CON','INS') GROUP BY NUMERO_DO_TRANSPORTE)
-      SELECT
-        p.NUMERO_DO_TRANSPORTE,
-        p.qtd                                                    AS planilhados,
-        COALESCE(c.qtd, 0)                                       AS concluidos,
-        COALESCE(i.qtd, 0)                                       AS insucesso,
-        GREATEST(p.qtd - COALESCE(f.qtd, 0), 0)                 AS pendentes,
-        ROUND(COALESCE(c.qtd, 0) * 100.0 / NULLIF(p.qtd, 0), 2) AS eficiencia_pct
-      FROM planilhados p
-      LEFT JOIN concluidos  c ON p.NUMERO_DO_TRANSPORTE = c.NUMERO_DO_TRANSPORTE
-      LEFT JOIN insucesso   i ON p.NUMERO_DO_TRANSPORTE = i.NUMERO_DO_TRANSPORTE
-      LEFT JOIN finalizadas f ON p.NUMERO_DO_TRANSPORTE = f.NUMERO_DO_TRANSPORTE
-      ORDER BY p.qtd DESC
-    `);
-
-    return NextResponse.json({
-      ok: true, inicio, fim,
-      data:            rowsSetor,
-      itinerarios:     rowsItn,
-      transportadores: rowsTrp,
-    });
-
-  } catch (err: any) {
-    console.error("[Databricks] Erro:", err.message);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
-  }
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    inicio: "",
+    fim: "",
+    data: [],
+    itinerarios: [],
+    transportadores: [],
+  });
 }
+
+/*
+export async function GET(req: NextRequest) {
+    const { searchParams } = req.nextUrl;
+    const dataInicio = searchParams.get("inicio");
+    const dataFim    = searchParams.get("fim");
+    const setor      = searchParams.get("setor");
+
+    const hoje  = new Date();
+    const ontem = new Date(hoje);
+    ontem.setDate(hoje.getDate() - 1);
+    const fmtISO = (d: Date) => d.toISOString().split("T")[0];
+
+    const inicio = dataInicio ?? fmtISO(ontem);
+    const fim    = dataFim    ?? fmtISO(ontem);
+
+    const setorFiltro        = setor ?? "Expedição Manaus";
+    const itinerariosDoSetor = SETOR_ITINERARIOS[setorFiltro];
+    const inClause           = itinerariosDoSetor
+      ? itinerariosDoSetor.map(i => `'${i}'`).join(",")
+      : "'NENHUM'";
+
+    // ✅ CACHE — devolve resposta cacheada se ainda dentro do TTL
+    const cacheKey = `${inicio}|${fim}|${setorFiltro}`;
+    const hit      = cache.get(cacheKey);
+    if (hit && Date.now() - hit.ts < TTL) {
+      return NextResponse.json(hit.data);
+    }
+
+    try {
+      // Query 1 — KPIs por setor
+      const rowsSetor = await runQuery(`
+        ${buildBase(inicio, fim)},
+        com_setor AS (
+          SELECT *, ${buildCaseSetor()} AS SETOR FROM base
+        ),
+        planilhados AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor GROUP BY SETOR),
+        concluidos  AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor WHERE STATUS_DA_ENTREGA = 'CON' GROUP BY SETOR),
+        insucesso   AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor WHERE TIPO_HISTORICO = 'INS' GROUP BY SETOR),
+        finalizadas AS (SELECT SETOR, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM com_setor WHERE STATUS_DA_ENTREGA IN ('CON','INS') GROUP BY SETOR),
+        transportes AS (SELECT SETOR, COUNT(DISTINCT NUMERO_DO_TRANSPORTE) AS qtd FROM com_setor GROUP BY SETOR)
+        SELECT
+          p.SETOR,
+          p.qtd                                                    AS planilhados,
+          COALESCE(c.qtd, 0)                                       AS concluidos,
+          COALESCE(i.qtd, 0)                                       AS insucesso,
+          GREATEST(p.qtd - COALESCE(f.qtd, 0), 0)                 AS pendentes,
+          t.qtd                                                    AS total_transportes,
+          ROUND(p.qtd * 1.0 / NULLIF(t.qtd, 0), 1)                AS media_nf_viagem,
+          ROUND(COALESCE(c.qtd, 0) * 100.0 / NULLIF(p.qtd, 0), 2) AS eficiencia_pct
+        FROM planilhados p
+        LEFT JOIN concluidos  c ON p.SETOR = c.SETOR
+        LEFT JOIN insucesso   i ON p.SETOR = i.SETOR
+        LEFT JOIN finalizadas f ON p.SETOR = f.SETOR
+        LEFT JOIN transportes t ON p.SETOR = t.SETOR
+        ORDER BY p.SETOR
+      `);
+
+      // Query 2 — por itinerário do setor selecionado
+      const rowsItn = await runQuery(`
+        ${buildBase(inicio, fim, `AND LPAD(CAST(f.ITINERARIO AS STRING), 6, '0') IN (${inClause})`)},
+        planilhados AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base GROUP BY ITINERARIO),
+        concluidos  AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA = 'CON' GROUP BY ITINERARIO),
+        insucesso   AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE TIPO_HISTORICO = 'INS' GROUP BY ITINERARIO),
+        finalizadas AS (SELECT ITINERARIO, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA IN ('CON','INS') GROUP BY ITINERARIO)
+        SELECT
+          p.ITINERARIO,
+          p.qtd                                                    AS planilhados,
+          COALESCE(c.qtd, 0)                                       AS concluidos,
+          COALESCE(i.qtd, 0)                                       AS insucesso,
+          GREATEST(p.qtd - COALESCE(f.qtd, 0), 0)                 AS pendentes,
+          ROUND(COALESCE(c.qtd, 0) * 100.0 / NULLIF(p.qtd, 0), 2) AS eficiencia_pct
+        FROM planilhados p
+        LEFT JOIN concluidos  c ON p.ITINERARIO = c.ITINERARIO
+        LEFT JOIN insucesso   i ON p.ITINERARIO = i.ITINERARIO
+        LEFT JOIN finalizadas f ON p.ITINERARIO = f.ITINERARIO
+        ORDER BY p.qtd DESC
+      `);
+
+      // Query 3 — por transporte do setor selecionado
+      const rowsTrp = await runQuery(`
+        ${buildBase(inicio, fim, `AND LPAD(CAST(f.ITINERARIO AS STRING), 6, '0') IN (${inClause})`)},
+        planilhados AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base GROUP BY NUMERO_DO_TRANSPORTE),
+        concluidos  AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA = 'CON' GROUP BY NUMERO_DO_TRANSPORTE),
+        insucesso   AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE TIPO_HISTORICO = 'INS' GROUP BY NUMERO_DO_TRANSPORTE),
+        finalizadas AS (SELECT NUMERO_DO_TRANSPORTE, COUNT(DISTINCT NOTA_FISCAL_VBRK) AS qtd FROM base WHERE STATUS_DA_ENTREGA IN ('CON','INS') GROUP BY NUMERO_DO_TRANSPORTE)
+        SELECT
+          p.NUMERO_DO_TRANSPORTE,
+          p.qtd                                                    AS planilhados,
+          COALESCE(c.qtd, 0)                                       AS concluidos,
+          COALESCE(i.qtd, 0)                                       AS insucesso,
+          GREATEST(p.qtd - COALESCE(f.qtd, 0), 0)                 AS pendentes,
+          ROUND(COALESCE(c.qtd, 0) * 100.0 / NULLIF(p.qtd, 0), 2) AS eficiencia_pct
+        FROM planilhados p
+        LEFT JOIN concluidos  c ON p.NUMERO_DO_TRANSPORTE = c.NUMERO_DO_TRANSPORTE
+        LEFT JOIN insucesso   i ON p.NUMERO_DO_TRANSPORTE = i.NUMERO_DO_TRANSPORTE
+        LEFT JOIN finalizadas f ON p.NUMERO_DO_TRANSPORTE = f.NUMERO_DO_TRANSPORTE
+        ORDER BY p.qtd DESC
+      `);
+
+      const payload = {
+        ok: true, inicio, fim,
+        data:            rowsSetor,
+        itinerarios:     rowsItn,
+        transportadores: rowsTrp,
+      };
+
+      // ✅ Salva no cache
+      cache.set(cacheKey, { data: payload, ts: Date.now() });
+      return NextResponse.json(payload);
+
+    } catch (err: any) {
+      console.error("[Databricks] Erro:", err.message);
+      return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    }
+  }
+    */

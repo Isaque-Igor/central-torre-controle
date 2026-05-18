@@ -199,7 +199,7 @@ export default function Marketplace() {
         <div className="panel">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <div className="panel-title" style={{ margin: 0 }}>Notas por Fornecedor</div>
-            <span className="panel-badge">TOP 15 · {dataSel}</span>
+            <span className="panel-badge">TODOS · {dataSel}</span>
           </div>
           {loading ? (
             <div style={{ height: 400, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>

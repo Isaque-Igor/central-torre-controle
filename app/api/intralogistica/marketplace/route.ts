@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     .order("criado_em", { ascending: false });
 
   const exportacao = notasCompletas?.map((n: any) => ({
-    criado_em: new Date(n.criado_em).toLocaleString("pt-BR"),
+    criado_em: new Date(n.criado_em).toLocaleDateString("pt-BR"),
     numero_nota: n.numero_nota ?? "",
     chave: n.chave ?? "",
     area: n.cargas_cd?.area ?? "Sem área",

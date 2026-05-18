@@ -40,7 +40,7 @@ export default function ReuniaoSistematica() {
   const ABAS = [
     { label: "Entrega Cliente", id: "entrega-cliente" },
     { label: "On Time Delivery", id: "otd" },
-    { label: "On Time Accuracy", id: "ota" },
+    { label: "On Time Assembly", id: "ota" },
   ];
 
   useEffect(() => {
