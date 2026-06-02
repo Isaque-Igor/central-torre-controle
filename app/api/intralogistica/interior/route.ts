@@ -1,58 +1,45 @@
-// app/api/intralogistica/marketplace/route.ts
+// app/api/intralogistica/interior/route.ts
 import { NextResponse, NextRequest } from "next/server";
 import { supabase } from "@/app/lib/supabase";
 
-const FORNECEDORES_EXCLUIR = [
-  "Marketplace",
+// Apenas fornecedores que são do Interior
+const FORNECEDORES_INTERIOR = [
   "Marjom - Interior",
   "Rampap - Interior",
   "Mercado",
   "Farma - BOL",
   "Transferência de Loja - BOL",
+  "Marketplace"
+  // adicione outros aqui
 ];
 
-const EXCLUIR_FILTRO = `(${FORNECEDORES_EXCLUIR.map(f => `"${f}"`).join(",")})`;
+const FILTRO_INTERIOR = `(${FORNECEDORES_INTERIOR.map(f => `"${f}"`).join(",")})`;
 
 export async function GET(req: NextRequest) {
   const dataParam  = req.nextUrl.searchParams.get("data") ?? new Date().toISOString().split("T")[0];
   const inicioHoje = `${dataParam}T00:00:00.000Z`;
   const fimHoje    = `${dataParam}T23:59:59.999Z`;
 
-  // Total recebido
+  // Total recebido (apenas do Interior)
   const { count: totalRecebido } = await supabase
     .from("notas_fiscais_cd")
     .select("*", { count: "exact", head: true })
-    .not("fornecedor_intermediario", "in", EXCLUIR_FILTRO)
+    .in("fornecedor", FORNECEDORES_INTERIOR)
     .gte("criado_em", inicioHoje)
     .lt("criado_em", fimHoje);
-
-  // Por área (faz join via carga_id_intermediaria)
-  const { data: porArea } = await supabase
-    .from("notas_fiscais_cd")
-    .select("cargas_cd!carga_id_intermediaria(area)")
-    .gte("criado_em", inicioHoje)
-    .lt("criado_em", fimHoje)
-    .not("fornecedor_intermediario", "in", EXCLUIR_FILTRO)
-    .range(0, 4999);
-
-  const areaCount: Record<string, number> = { Manaus: 0, Interior: 0, Interestadual: 0 };
-  porArea?.forEach((n: any) => {
-    const area = n.cargas_cd?.area;
-    if (area && areaCount[area] !== undefined) areaCount[area]++;
-  });
 
   // Por fornecedor
   const { data: porFornecedor } = await supabase
     .from("notas_fiscais_cd")
-    .select("fornecedor_intermediario")
+    .select("fornecedor")
+    .in("fornecedor", FORNECEDORES_INTERIOR)
     .gte("criado_em", inicioHoje)
     .lt("criado_em", fimHoje)
-    .not("fornecedor_intermediario", "in", EXCLUIR_FILTRO)
     .range(0, 4999);
 
   const fornecedorCount: Record<string, number> = {};
   porFornecedor?.forEach((n: any) => {
-    const f = n.fornecedor_intermediario ?? "Sem fornecedor";
+    const f = n.fornecedor ?? "Sem fornecedor";
     fornecedorCount[f] = (fornecedorCount[f] ?? 0) + 1;
   });
 
@@ -63,11 +50,11 @@ export async function GET(req: NextRequest) {
   // Exportação
   const { data: notasCompletas } = await supabase
     .from("notas_fiscais_cd")
-    .select(`criado_em, numero_nota, chave, fornecedor_intermediario, cargas_cd!carga_id_intermediaria(area)`)
+    .select(`criado_em, numero_nota, chave, fornecedor, cargas_cd(area)`)
+    .in("fornecedor", FORNECEDORES_INTERIOR)
     .gte("criado_em", inicioHoje)
     .lt("criado_em", fimHoje)
     .order("criado_em", { ascending: false })
-    .not("fornecedor_intermediario", "in", EXCLUIR_FILTRO)
     .range(0, 4999);
 
   const exportacao = notasCompletas?.map((n: any) => ({
@@ -75,13 +62,12 @@ export async function GET(req: NextRequest) {
     numero_nota: n.numero_nota ?? "",
     chave: n.chave ?? "",
     area: n.cargas_cd?.area ?? "Sem área",
-    fornecedor: n.fornecedor_intermediario ?? "Sem fornecedor",
+    fornecedor: n.fornecedor ?? "Sem fornecedor",
   })) ?? [];
 
   return NextResponse.json({
     ok: true,
     totalRecebido: totalRecebido ?? 0,
-    porArea: areaCount,
     fornecedores,
     exportacao,
   });

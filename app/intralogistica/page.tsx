@@ -24,7 +24,7 @@ const AREAS = [
     titulo: "Expedição Interior",
     descricao: "Acompanhamento das expedições para o interior do Amazonas e demais estados.",
     tags: ["Expedição", "Interior", "Fluvial"],
-    ativo: false,
+    ativo: true,
   },
   {
     id: "expedicao-interestadual",

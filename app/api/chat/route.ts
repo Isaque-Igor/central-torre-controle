@@ -1,4 +1,3 @@
-// app/api/chat/route.ts
 import { NextResponse, NextRequest } from "next/server";
 
 const OPENCLAW_URL   = "http://127.0.0.1:18789/v1/chat/completions";

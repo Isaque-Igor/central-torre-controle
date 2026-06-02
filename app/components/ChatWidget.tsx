@@ -14,6 +14,7 @@ export default function ChatWidget() {
   const [loading, setLoading]     = useState(false);
   const fimRef                    = useRef<HTMLDivElement>(null);
   const [sessionId, setSessionId] = useState<string>("");
+  const [statusOnline, setStatusOnline] = useState(true);
 
   useEffect(() => {
     let id = localStorage.getItem("chat-session-id");
@@ -22,6 +23,18 @@ export default function ChatWidget() {
       localStorage.setItem("chat-session-id", id);
     }
     setSessionId(id);
+  }, []);
+
+  useEffect(() => {
+    const verificar = () => {
+      fetch("/api/chat/status")
+        .then(r => r.json())
+        .then(d => setStatusOnline(d.status === "online"))
+        .catch(() => setStatusOnline(false));
+    };
+    verificar();
+    const interval = setInterval(verificar, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -45,7 +58,11 @@ export default function ChatWidget() {
       const data = await res.json();
       setMensagens([...novas, { role: "assistant", content: data.reply }]);
     } catch {
-      setMensagens([...novas, { role: "assistant", content: "Erro ao conectar com o agente, solicite suporte com o time." }]);
+      setMensagens([...novas, { 
+        role: "assistant", 
+        content: "🔄 O agente está reconectando agora. Tente novamente em alguns segundos — nosso sistema vai restaurá-lo automaticamente." 
+      }]);
+      setStatusOnline(false);
     } finally {
       setLoading(false);
     }
@@ -89,8 +106,8 @@ export default function ChatWidget() {
               <div style={{ fontFamily: "var(--font-condensed)", fontSize: 14, fontWeight: 700, textTransform: "uppercase", color: "var(--text-primary)" }}>
                 🦞 NEMOCLAW
               </div>
-              <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--green)" }}>
-                ● Online · qwen3.6
+              <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: statusOnline ? "var(--green)" : "var(--amber)" }}>
+                {statusOnline ? "● Online · qwen3.6:latest" : "● Reconectando..."}
               </div>
             </div>
             <button onClick={() => setAberto(false)} style={{
